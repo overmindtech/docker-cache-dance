@@ -1,0 +1,37 @@
+name: Inject Cache
+description: "Injects the cached data into the docker build(x|kit) process"
+inputs:
+  cache-source:
+    default: cache
+    description: "Where the cache is stored in the calling workspace"
+  cache-target:
+    default: /root/.cache/go-build
+    description: "Where the cache is stored in the docker container"
+  scratch-dir:
+    default: scratch
+    description: "Where the action is stores some temporary files for its processing"
+runs:
+  using: composite
+  steps:
+    - name: Setup Cache and Scratch Dirs
+      shell: bash
+      run: |
+        rm -Rf ${{ inputs.scratch-dir }}
+        mkdir -p ${{ inputs.cache-source }} ${{ inputs.scratch-dir }}
+    - name: Prepare Timestamp for Layer Cache Busting
+      shell: bash
+      run: |
+        date --iso=ns > ${{ inputs.scratch-dir }}/buildstamp
+    - name: Prepare Dancefile to Access Caches
+      shell: bash
+      run: |
+        echo "FROM alpine:3.17" > ${{ inputs.scratch-dir }}/Dancefile.inject
+        echo "COPY buildstamp buildstamp" >> ${{ inputs.scratch-dir }}/Dancefile.inject
+        echo "RUN --mount=type=cache,target=${{ inputs.cache-target }} \\" >> ${{ inputs.scratch-dir }}/Dancefile.inject
+        echo "  --mount=type=bind,source=${{ inputs.cache-source }},target=/var/dance-cache \\" >> ${{ inputs.scratch-dir }}/Dancefile.inject
+        echo "  cp -R /var/dance-cache/* ${{ inputs.cache-source }} || true" >> ${{ inputs.scratch-dir }}/Dancefile.inject
+        cat ${{ inputs.scratch-dir }}/Dancefile.inject
+    - name: Inject Data into Docker Cache
+      shell: bash
+      run: |
+        docker buildx build -f ${{ inputs.scratch-dir }}/Dancefile.inject --tag dance:inject ${{ inputs.scratch-dir }}
